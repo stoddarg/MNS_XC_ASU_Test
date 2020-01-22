@@ -43,6 +43,8 @@
  * 	4 x 4
  * 	8 x 8 x 4
  * 	Doubles are 8 bytes.
+ *
+ * Size = 320 bytes (1-21-2020)
  */
 typedef struct {
 	float ECalSlope;
@@ -53,6 +55,7 @@ typedef struct {
 	int IntegrationLong;
 	int IntegrationFull;
 	int HighVoltageValue[4];
+	//4 padding bytes
 	double SF_E[8];
 	double SF_PSD[8];
 	double Off_E[8];
@@ -60,6 +63,7 @@ typedef struct {
 	int TotalFiles;
 	int TotalFolders;
 	unsigned int MostRecentRealTime;
+	//4 padding bytes
 } CONFIG_STRUCT_TYPE;
 
 /*
@@ -80,7 +84,7 @@ typedef struct {
 *
 */
 typedef struct{
-	CONFIG_STRUCT_TYPE configBuff;	//43 4-byte values
+	CONFIG_STRUCT_TYPE configBuff;	//320 bytes
 	unsigned int IDNum;
 	unsigned int RunNum;
 	unsigned int SetNum;
