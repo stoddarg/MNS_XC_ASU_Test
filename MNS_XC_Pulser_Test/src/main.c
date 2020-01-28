@@ -48,6 +48,8 @@
  * 15 ms "protection" period should be applied to all UART send commands so the XB-1 doesn't
  *  get swamped when we are sending packets to it.
  *
+ * 1-22-2020
+ * The boot files created at 12:30pm are Version 7.1
  */
 
 #include "main.h"
@@ -265,7 +267,7 @@ int main()
 			}
 			//prepare the status variables
 			done = 0;	//not done yet
-			ResetNeutronCounts();	//set the SOH neutron count reports back to 0 for the run
+			ResetSOHNeutronCounts();	//set the SOH counts to 0
 			CPSInit();	//reset neutron counts for the run
 			status = CMD_SUCCESS;	//reset the variable so that we jump into the loop
 			SetModeByte(MODE_PRE_DAQ);

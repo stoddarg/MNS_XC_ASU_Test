@@ -12,6 +12,7 @@
 #include <xtime_l.h>
 #include <xuartps.h>
 #include "ff.h"
+#include "CPSDataProduct.h"		//get access to cpsEvent struct and access functions
 #include "ReadCommandType.h"	//gives access to last command strings
 #include "lunah_defines.h"
 #include "LI2C_Interface.h"		//talk to I2C devices (temperature sensors)
@@ -22,15 +23,18 @@
 
 #define TAB_CHAR_CODE		9
 #define NEWLINE_CHAR_CODE	10
-#define SOH_PACKET_LENGTH	56
+#define SOH_PACKET_LENGTH	93	//56
 #define TEMP_PACKET_LENGTH	19
+#define	TX_FILE_STRING_BUFF_SIZE	100
+#define CMD_BUFFER_SIZE		100
+#define	SOH_BUFFER_SIZE		150
 
 // prototypes
 void InitStartTime( void );
 XTime GetLocalTime( void );
 XTime GetTempTime(void);
-void ResetNeutronCounts( void );
-int IncNeutronTotal(int pmt_id, int increment);
+void ResetSOHNeutronCounts( void );
+int IncNeutronTotal(int pmt_id, int ellipse_1, int ellipse_2, int non_n, int high_energy, unsigned int time);
 int GetDigiTemp( void );
 int GetAnlgTemp( void );
 int GetModuTemp( void );

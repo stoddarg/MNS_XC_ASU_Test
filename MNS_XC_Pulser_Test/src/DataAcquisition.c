@@ -576,13 +576,6 @@ int DataAcquisition( XIicPs * Iic, XUartPs Uart_PS, char * RecvBuffer, int time_
 	f_res = f_open(&m_raw_data_file, "raw_data.bin", FA_OPEN_ALWAYS|FA_READ|FA_WRITE);
 #endif
 
-/* Leave these back where they were for now */
-	//enable the system for real here
-	//can't clear the buffers, it will overwrite the false event there
-//	Xil_Out32(XPAR_AXI_GPIO_18_BASEADDR, 1);	//enable capture module //Begin collecting data
-//	usleep(1);
-//	Xil_Out32(XPAR_AXI_GPIO_6_BASEADDR, 1);		//enable ADC
-
 	while(done != 1)
 	{
 		valid_data = Xil_In32 (XPAR_AXI_GPIO_11_BASEADDR);
@@ -657,7 +650,6 @@ int DataAcquisition( XIicPs * Iic, XUartPs Uart_PS, char * RecvBuffer, int time_
 					//TODO: error check
 					xil_printf("8 error syncing DAQ\n");
 				}
-//				sd_updateFileRecords("raw_data.bin", file_size(&m_raw_data_file));
 #endif
 
 				//check the file size and see if we need to change files
@@ -668,9 +660,7 @@ int DataAcquisition( XIicPs * Iic, XUartPs Uart_PS, char * RecvBuffer, int time_
 					f_res = f_write(&m_EVT_file, &file_footer_to_write, sizeof(file_footer_to_write), &bytes_written);
 					if(f_res != FR_OK || bytes_written != sizeof(file_footer_to_write))
 						status = CMD_FAILURE;
-					//just before we close the file, write the final record of it
-//					sd_updateFileRecords(current_filename_EVT, file_size(&m_EVT_file));
-					//then close the file, as we're done with it
+
 					f_close(&m_EVT_file);
 					//create the new file name (increment the set number)
 					daq_run_set_number++; file_header_to_write.SetNum = daq_run_set_number;

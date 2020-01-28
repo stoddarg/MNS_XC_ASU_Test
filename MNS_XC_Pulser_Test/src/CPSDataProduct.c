@@ -13,10 +13,6 @@ static unsigned int m_previous_1sec_interval_time;	//the previous 1 second inter
 static float m_num_intervals_elapsed;				//how many intervals have elapsed during the current run (effectively one/sec)
 static CPS_EVENT_STRUCT_TYPE cpsEvent;				//the most recent CPS "event" (1 second of counts)
 static const CPS_EVENT_STRUCT_TYPE cpsEmptyStruct;	//an empty 'zero' struct to init or clear other structs
-static unsigned short m_neutrons_ellipse1;			//neutrons with PSD
-static unsigned short m_neutrons_ellipse2;			//neutrons wide cut
-static unsigned short m_non_neutron_events;			//all non-neutron events
-static unsigned short m_events_over_threshold;		//count all events which trigger the system
 
 static XTime cps_t_elapsed;	//was LocalTime
 static XTime cps_t_next_interval;	//added to take the place of t_elapsed
@@ -24,16 +20,12 @@ static XTime cps_t_start;	//was LocalTimeStart
 static XTime cps_t_current;	//was LocalTimeCurrent
 
 static unsigned int m_first_check;
-static unsigned int m_current_module_temp;
+static int m_current_module_temp;
 
 static double a_rad_1[4];		//semi-major axis
 static double b_rad_1[4];		//semi-minor axis
 static double mean_psd_1[4];	//Y center of the ellipse
 static double mean_nrg_1[4];	//X center of the ellipse
-//static double a_rad_2[4];
-//static double b_rad_2[4];
-//static double mean_psd_2[4];
-//static double mean_nrg_2[4];
 
 /* Temperature Correction Value Arrays
  * 2-D arrays example:
@@ -54,8 +46,6 @@ static double MaxPSD_C0[2][4] = {{ 11.7918, 11.886, 11.7809, 12.3862 },{ 13.7109
 static double MaxPSD_C1[2][4] = {{ -0.0674961, -0.110337, -0.0786917, -0.124806 },{ -0.142347, -0.0581908, -0.0982008, -0.0627177 }};
 static double MaxPSD_C2[2][4] = {{ 0.00122686, 0.00227616, 0.00144319, 0.0023301 },{ 0.00367359, 0.00116983, 0.0021518, 0.0010931 }};
 
-
-
 static CONFIG_STRUCT_TYPE m_cfg_buff;	//172 bytes
 
 /*
@@ -67,15 +57,11 @@ static CONFIG_STRUCT_TYPE m_cfg_buff;	//172 bytes
  */
 void CPSInit( void )
 {
+	cpsEvent = cpsEmptyStruct;
 	first_FPGA_time = 0;
 	m_previous_1sec_interval_time = 0;
 	m_num_intervals_elapsed = 0;
-	cpsEvent = cpsEmptyStruct;
-	m_neutrons_ellipse1 = 0;
-	m_neutrons_ellipse2 = 0;
-	m_non_neutron_events = 0;
-	m_events_over_threshold = 0;
-	//get the neutron cuts
+	//get the user-supplied neutron cuts
 	m_cfg_buff = *GetConfigBuffer();
 	m_current_module_temp = GetModuTemp();
 
@@ -84,18 +70,7 @@ void CPSInit( void )
 
 void CPSResetCounts( void )
 {
-	m_neutrons_ellipse1 = 0;	//reset the values from processing
-	m_neutrons_ellipse2 = 0;
-	m_non_neutron_events = 0;
-	m_events_over_threshold = 0;
-	cpsEvent.n_ellipse1_MSB = 0;//reset values in the struct we report
-	cpsEvent.n_ellipse1_LSB = 0;
-	cpsEvent.n_ellipse2_MSB = 0;
-	cpsEvent.n_ellipse2_LSB = 0;
-	cpsEvent.non_n_events_MSB = 0;
-	cpsEvent.non_n_events_LSB = 0;
-	cpsEvent.high_energy_events_MSB = 0;
-	cpsEvent.high_energy_events_LSB = 0;
+	cpsEvent = cpsEmptyStruct;
 	return;
 }
 
@@ -197,26 +172,22 @@ bool cpsCheckTime( unsigned int time )
  *  returns a pointer to the struct after updating it with the most up-to-date
  *  information regarding the DAQ run.
  *
+ * We clear the entire structure after each one-second interval elapses, then
+ *  the values for each PMT get populated as the buffers are processed. This
+ *  means that the only numbers which need to get re-written are the event ID,
+ *  the time, and the temperature.
+ *
  * @param	None
  *
  * @return	Pointer to a CPS Event held in a struct
  */
 CPS_EVENT_STRUCT_TYPE * cpsGetEvent( void )
 {
-	cpsEvent.n_ellipse1_MSB = (unsigned char)(m_neutrons_ellipse1 >> 8);
-	cpsEvent.n_ellipse1_LSB = (unsigned char)(m_neutrons_ellipse1);
-	cpsEvent.n_ellipse2_MSB = (unsigned char)(m_neutrons_ellipse2 >> 8);
-	cpsEvent.n_ellipse2_LSB = (unsigned char)(m_neutrons_ellipse2);
-	cpsEvent.non_n_events_MSB = (unsigned char)(m_non_neutron_events >> 8); //will need to modify this to take non-neutron cuts
-	cpsEvent.non_n_events_LSB = (unsigned char)(m_non_neutron_events);
-	cpsEvent.high_energy_events_MSB = (unsigned char)(m_events_over_threshold >> 8);
-	cpsEvent.high_energy_events_LSB = (unsigned char)(m_events_over_threshold);
 	cpsEvent.event_id = 0x55;	//use the APID for CPS
-	cpsEvent.time_MSB = (unsigned char)(m_previous_1sec_interval_time >> 24);
-	cpsEvent.time_LSB1 = (unsigned char)(m_previous_1sec_interval_time >> 16);
-	cpsEvent.time_LSB2 = (unsigned char)(m_previous_1sec_interval_time >> 8);
-	cpsEvent.time_LSB3 = (unsigned char)(m_previous_1sec_interval_time);
-	cpsEvent.modu_temp = (unsigned char)GetModuTemp();
+	cpsEvent.modu_temp = (char)GetModuTemp();
+	cpsEvent.pad_byte_1 = 0x55;	//use the APID for CPS
+	cpsEvent.pad_byte_2 = 0x55;	//use the APID for CPS
+	cpsEvent.time = m_previous_1sec_interval_time;
 
 	return &cpsEvent;
 }
@@ -225,6 +196,11 @@ CPS_EVENT_STRUCT_TYPE * cpsGetEvent( void )
  * Helper function which takes in the energy, psd, module number, and the ellipse numbers and calculates the
  *  equations for the ellipses. Then it does the comparison to see if the point (energy, psd) is within the
  *  bounding ellipses.
+ *
+ * TODO: clean up the first few lines of this function - they can be performed less often if held as static variables
+ * 			and calculated with the other neutron cut window parameters
+ * TODO: move away from the sqrt() function and instead work with squares; trig and some math functions are time
+ * 			and processor expensive
  *
  *  @param	(double) the baseline corrected energy value
  *  @param	(double) the baseline corrected PSD value
@@ -235,14 +211,15 @@ CPS_EVENT_STRUCT_TYPE * cpsGetEvent( void )
  *  			   FALSE if the event was not within the ellipse
  *
  */
-bool CPSIsWithinEllipse( double energy, double psd, int module_num, int ellipse_num )
+bool CPSIsWithinEllipse( int energy, int psd, int pmt_id, int module_num, int ellipse_num )
 {
 	bool ret = FALSE;
 	double c1 = (m_cfg_buff.SF_PSD[ellipse_num] * b_rad_1[module_num]) / (m_cfg_buff.SF_E[ellipse_num] * a_rad_1[module_num]);
 	double c2 = m_cfg_buff.SF_E[ellipse_num] * a_rad_1[module_num];
 	double xco = mean_nrg_1[module_num] + m_cfg_buff.Off_E[ellipse_num];
-	double xval = energy - xco;
-	double yval = psd	- mean_psd_1[module_num] - m_cfg_buff.Off_PSD[ellipse_num];
+	//TODO: how do I resolve this type mis-match?
+	double xval = (double)energy - xco;
+	double yval = (double)psd	- mean_psd_1[module_num] - m_cfg_buff.Off_PSD[ellipse_num];
 
 	//check x-coords
 	//if this inequality is not met, then we cannot check y-coords or we will square root a negative number
@@ -250,9 +227,45 @@ bool CPSIsWithinEllipse( double energy, double psd, int module_num, int ellipse_
 	{
 		//check y-coords
 		if(	yval <  c1 * sqrt( c2 * c2 - xval * xval) && yval > -c1 * sqrt( c2 * c2 - xval * xval))
+		{
+			//add a count to the appropriate CPS event field //this is based on PMT ID and ellipse number
 			ret = TRUE;
+			switch(pmt_id)
+			{
+			case PMT_ID_0:
+				if(ellipse_num % 2 == 0)
+					cpsEvent.n_ellipse1_0++;
+				else
+					cpsEvent.n_ellipse2_0++;
+				break;
+			case PMT_ID_1:
+				if(ellipse_num % 2 == 0)
+					cpsEvent.n_ellipse1_1++;
+				else
+					cpsEvent.n_ellipse2_1++;
+				break;
+			case PMT_ID_2:
+				if(ellipse_num % 2 == 0)
+					cpsEvent.n_ellipse1_2++;
+				else
+					cpsEvent.n_ellipse2_2++;
+				break;
+			case PMT_ID_3:
+				if(ellipse_num % 2 == 0)
+					cpsEvent.n_ellipse1_3++;
+				else
+					cpsEvent.n_ellipse2_3++;
+				break;
+			default:
+				//what to do if we get a bad PMT ID?
+				ret = FALSE;
+				break;
+			}
+		}
 		else
+		{
 			ret = FALSE;
+		}
 	}
 
 	return ret;
@@ -292,25 +305,30 @@ bool CPSIsWithinEllipse( double energy, double psd, int module_num, int ellipse_
  * 		affect these cuts. Once we implement the elliptical cuts, we'll get rid of those values.
  *
  *
- * @param	(float) value for the energy calculated from the Full Integral from the event
- * @param	(float) value for the PSD calculated from the short and long integrals from the event
+ * @param	(int) value for the energy calculated from the Full Integral from the event
+ * @param	(int) value for the PSD calculated from the short and long integrals from the event
  *
- * @return	(int) returns a 1 if there was a hit in the regular or wide neutron cut boxes, returns 0 otherwise
+ * @return	(int) 	returns a 1 if there was a hit in the primary or secondary neutron cut windows
+ * 					0 if no hit was found
+ * 					-1 if there was an error with the PMT hit ID
  */
-int CPSUpdateTallies(double energy, double psd, int pmt_id)
+int CPSUpdateTallies(int energy_bin, int psd_bin, int pmt_id)
 {
+	int status = 0;
 	int iter = 0;
 	int check_temp = 0;
-	int m_neutron_detected = 0;
-	int model_id_num = 0;
-	int ell_1 = 0;	//ellipse 1
-	int ell_2 = 0;	//ellipse 2
+	int module_id_num = 0;
+	int ell_1 = 0;
+	int ell_2 = 0;
+	int n_detected_ell_1 = 0;
+	int n_detected_ell_2 = 0;
+	int n_high_e = 0;
+	int non_n_event = 0;
 	double MaxNRG = 0;
 	double MinNRG = 0;
 	double MaxPSD = 0;
 	double MinPSD = 0;
-	double energy_converted = 0;
-	double psd_converted = 0;
+
 	//check the temperature if it has been ~10s
 	XTime_GetTime(&cps_t_current);
 	cps_t_elapsed = (cps_t_current - cps_t_start)/COUNTS_PER_SECOND;
@@ -326,6 +344,7 @@ int CPSUpdateTallies(double energy, double psd, int pmt_id)
 		//if the temp doesn't match or we haven't checked yet, then we are guaranteed to update the cut parameters
 		if(m_current_module_temp != check_temp || m_first_check == 0)
 		{
+			m_current_module_temp = check_temp;
 			//Calculate the values for the cuts to used
 			//This is based on the temperature, which is the driver for where the cuts should be.
 			//The other driver is the module number, as each module has different cuts.
@@ -342,87 +361,111 @@ int CPSUpdateTallies(double energy, double psd, int pmt_id)
 
 				MinPSD *= (double)TWODH_Y_BINS / (double)TWODH_PSD_MAX;
 				MaxPSD *= (double)TWODH_Y_BINS / (double)TWODH_PSD_MAX;
-
-				//the scaling should all happen with the configuration parameters
-	//			MinNRG *= 0.8;	//random extra scaling
-	//			MaxNRG *= 1.2;
 				//calculate the parameters
 				//will need to modify these parameters with the scale factor & offset values from setIntstrumentParams
 				a_rad_1[iter] =	 (MaxNRG - MinNRG) / 2.0;	// a, semi-major axis
 				b_rad_1[iter] =	 (MaxPSD - MinPSD) / 2.0;	// b, semi-minor axis
 				mean_nrg_1[iter] = (MaxNRG + MinNRG) / 2.0;	// X center
 				mean_psd_1[iter] = (MaxPSD + MinPSD) / 2.0;	// Y center
-
-				//find the values for the larger ellipse (if we're doing a statically larger ellipse ~20% or something)
-				//find the values for: mean_psd_2, mean_nrg_2, brad_2, arad_2
-	//			a_rad_2[iter] =	 (MaxNRG - MinNRG) / 2.0;
-	//			b_rad_2[iter] =	 (MaxPSD - MinPSD) / 2.0;
-	//			mean_psd_2[iter] = (MaxNRG + MinNRG) / 2.0;
-	//			mean_nrg_2[iter] = (MaxPSD + MinPSD) / 2.0;
 			}
-
 			//indicate that we have checked (and set) these parameters at least once
 			m_first_check = 1;
 		}
 	}
 
-	//need to convert the energy from a double value which is not correlated to any bin values
-	// to the bin space
-	//The neutron cuts are in terms of bin value, so need to
-	energy_converted = energy / ((double)TWODH_ENERGY_MAX / (double)TWODH_X_BINS);
-	psd_converted = psd / ((double)TWODH_PSD_MAX / (double)TWODH_Y_BINS);
-
 	//compare energy, psd values to the cuts //tally if inside, otherwise no tally
 	///////////
 	//NOTE: if the pmt ID number is not a single hit, then we won't add it to the tallies
 	///////////
-	if(pmt_id == PMT_ID_0 || pmt_id == PMT_ID_1 || pmt_id == PMT_ID_2 || pmt_id == PMT_ID_3)
+	switch(pmt_id)
 	{
-		switch(pmt_id)
+	case PMT_ID_0:
+		module_id_num = 0;
+		ell_1 = 0;
+		ell_2 = 1;
+		if(energy_bin >= TWODH_X_BINS)
 		{
-		case PMT_ID_0:
-			model_id_num = 0;
-			ell_1 = 0;
-			ell_2 = 1;
-			break;
-		case PMT_ID_1:
-			model_id_num = 1;
-			ell_1 = 2;
-			ell_2 = 3;
-			break;
-		case PMT_ID_2:
-			model_id_num = 2;
-			ell_1 = 4;
-			ell_2 = 5;
-			break;
-		case PMT_ID_3:
-			model_id_num = 3;
-			ell_1 = 6;
-			ell_2 = 7;
-			break;
+			cpsEvent.high_energy_events_0++;
+			n_high_e = 1;
 		}
-
-		if(CPSIsWithinEllipse(energy_converted, psd_converted, model_id_num, ell_1))
+		break;
+	case PMT_ID_1:
+		module_id_num = 1;
+		ell_1 = 2;
+		ell_2 = 3;
+		if(energy_bin >= TWODH_X_BINS)
 		{
-			m_neutrons_ellipse1++;
-			m_neutron_detected = 1;
+			cpsEvent.high_energy_events_1++;
+			n_high_e = 1;
 		}
-		//now calculate the second ellipse and take those cuts:
-		if(CPSIsWithinEllipse(energy_converted, psd_converted, model_id_num, ell_2))
+		break;
+	case PMT_ID_2:
+		module_id_num = 2;
+		ell_1 = 4;
+		ell_2 = 5;
+		if(energy_bin >= TWODH_X_BINS)
 		{
-			m_neutrons_ellipse2++;
-			m_neutron_detected = 1;
+			cpsEvent.high_energy_events_2++;
+			n_high_e = 1;
 		}
+		break;
+	case PMT_ID_3:
+		module_id_num = 3;
+		ell_1 = 6;
+		ell_2 = 7;
+		if(energy_bin >= TWODH_X_BINS)
+		{
+			cpsEvent.high_energy_events_3++;
+			n_high_e = 1;
+		}
+		break;
+	default:
+		n_high_e = 0;
+		status = -1;
+		break;
 	}
-	//also collect the values for neutrons with energy greater than 10 MeV
-	if(energy_converted > TWODH_ENERGY_MAX)	//this will eventually be something like ConfigBuff.parameter
-		m_events_over_threshold++;
 
-	//does the event have a non-neutron?
-	if(m_neutron_detected == 0)
+	if(status != -1)
 	{
-		m_non_neutron_events++;
+		if(	CPSIsWithinEllipse(energy_bin, psd_bin, pmt_id, module_id_num, ell_1) == TRUE)
+			n_detected_ell_1 = 1;
+		else
+			n_detected_ell_1 = 0;
+
+		if( CPSIsWithinEllipse(energy_bin, psd_bin,  pmt_id, module_id_num, ell_2) == TRUE)
+			n_detected_ell_2 = 1;
+		else
+			n_detected_ell_2 = 0;
+
+		if(n_detected_ell_1 == 1 || n_detected_ell_2 == 1)
+			status = 1;
+		else
+		{
+			status = 0;
+			non_n_event = 1;
+			switch(pmt_id)
+			{
+			case PMT_ID_0:
+				cpsEvent.non_n_events_0++;
+				break;
+			case PMT_ID_1:
+				cpsEvent.non_n_events_1++;
+				break;
+			case PMT_ID_2:
+				cpsEvent.non_n_events_2++;
+				break;
+			case PMT_ID_3:
+				cpsEvent.non_n_events_3++;
+				break;
+			default:
+				status = -1;
+				break;
+			}
+		}
+
+		//send the result of these checks to the utility module
+		IncNeutronTotal( pmt_id, n_detected_ell_1, n_detected_ell_2, non_n_event, n_high_e, m_previous_1sec_interval_time);
 	}
 
-	return m_neutron_detected;
+	return status;
 }
